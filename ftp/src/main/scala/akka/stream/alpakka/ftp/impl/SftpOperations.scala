@@ -5,23 +5,17 @@
 package akka.stream.alpakka.ftp
 package impl
 
-import java.io.{File, IOException, InputStream, OutputStream}
+import java.io.{IOException, InputStream, OutputStream}
 import java.nio.file.attribute.PosixFilePermission
-import java.nio.charset.StandardCharsets
 
 import akka.annotation.InternalApi
 import net.schmizz.sshj.SSHClient
 import net.schmizz.sshj.sftp.{OpenMode, RemoteResourceInfo, SFTPClient}
-import net.schmizz.sshj.transport.verification.PromiscuousVerifier
-import net.schmizz.sshj.userauth.UserAuthException
-import net.schmizz.sshj.userauth.method.{AuthPassword, AuthPublickey}
-import net.schmizz.sshj.userauth.password.{PasswordFinder, PasswordUtils, Resource}
 import net.schmizz.sshj.xfer.FilePermission
-import org.apache.commons.net.DefaultSocketFactory
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
-import scala.util.{Failure, Try}
+import scala.util.Try
 
 /**
  * INTERNAL API
@@ -29,55 +23,12 @@ import scala.util.{Failure, Try}
 @InternalApi
 private[ftp] trait SftpOperations { _: FtpLike[SSHClient, SftpSettings] =>
 
+  type ConnectionT = SftpConnection
+
   type Handler = SFTPClient
 
-  def connect(connectionSettings: SftpSettings)(implicit ssh: SSHClient): Try[Handler] =
-    Try {
-      import connectionSettings._
-
-      proxy.foreach(p => ssh.setSocketFactory(new DefaultSocketFactory(p)))
-
-      if (!strictHostKeyChecking) {
-        ssh.addHostKeyVerifier(new PromiscuousVerifier)
-      } else {
-        knownHosts.foreach(path => ssh.loadKnownHosts(new File(path)))
-      }
-      ssh.connect(host.getHostAddress, port)
-
-      sftpIdentity match {
-        case Some(identity) =>
-          val keyAuth = authPublickey(identity)
-
-          if (credentials.password != "") {
-            val passwordAuth: AuthPassword = new AuthPassword(new PasswordFinder() {
-              def reqPassword(resource: Resource[_]): Array[Char] = credentials.password.toCharArray
-
-              def shouldRetry(resource: Resource[_]) = false
-            })
-
-            ssh.auth(credentials.username, passwordAuth, keyAuth)
-          } else {
-            ssh.auth(credentials.username, keyAuth)
-          }
-        case None =>
-          if (credentials.password != "") {
-            ssh.authPassword(credentials.username, credentials.password)
-          }
-      }
-
-      ssh.newSFTPClient()
-    } match {
-      case Failure(_: UserAuthException) =>
-        throw new FtpAuthenticationException(
-          s"unable to login to host=[${connectionSettings.host}], port=${connectionSettings.port} ${connectionSettings.proxy
-            .fold("")("proxy=" + _.toString)}"
-        )
-      case result => result
-    }
-
-  def disconnect(handler: Handler)(implicit ssh: SSHClient): Unit = {
-    handler.close()
-    if (ssh.isConnected) ssh.disconnect()
+  override def newConnection(client: SSHClient, connectionSettings: SftpSettings): SftpConnection = {
+    new SftpConnection(client, connectionSettings)
   }
 
   def listFiles(basePath: String, handler: Handler): immutable.Seq[FtpFile] = {
@@ -182,24 +133,6 @@ private[ftp] trait SftpOperations { _: FtpLike[SSHClient, SftpSettings] =>
         throw new IOException(s"Could not write to $name")
       }
     }
-
-  private[this] def authPublickey(identity: SftpIdentity)(implicit ssh: SSHClient) = {
-    def bats(array: Array[Byte]): String = new String(array, StandardCharsets.UTF_8)
-
-    val passphrase =
-      identity.privateKeyFilePassphrase
-        .map(pass => PasswordUtils.createOneOff(bats(pass).toCharArray))
-        .orNull
-
-    identity match {
-      case id: RawKeySftpIdentity =>
-        new AuthPublickey(
-          ssh.loadKeys(bats(id.privateKey), id.publicKey.map(bats).orNull, passphrase)
-        )
-      case id: KeyFileSftpIdentity =>
-        new AuthPublickey(ssh.loadKeys(id.privateKey, passphrase))
-    }
-  }
 
   def move(fromPath: String, destinationPath: String, handler: Handler): Unit =
     handler.rename(fromPath, destinationPath)

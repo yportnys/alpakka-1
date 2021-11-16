@@ -11,6 +11,7 @@ import akka.annotation.InternalApi
 import akka.stream.Shape
 import akka.stream.stage.GraphStageLogic
 
+import scala.util.Try
 import scala.util.control.NonFatal
 
 /**
@@ -24,18 +25,29 @@ private[ftp] abstract class FtpGraphStageLogic[T, FtpClient, S <: RemoteFileSett
     val ftpClient: () => FtpClient
 ) extends GraphStageLogic(shape) {
 
-  protected[this] implicit val client = ftpClient()
+  protected[this] var connection: Option[ftpLike.ConnectionT] = Option.empty[ftpLike.ConnectionT]
   protected[this] var handler: Option[ftpLike.Handler] = Option.empty[ftpLike.Handler]
   protected[this] var failed = false
 
   override def preStart(): Unit = {
     super.preStart()
+
     try {
-      val tryConnect = ftpLike.connect(connectionSettings)
+      val tryConnect = Try {
+        var cachedConnection: Option[ftpLike.ConnectionT] = None
+        if (connectionSettings.reuseConnections)
+          cachedConnection = ftpLike.getCachedConnection(connectionSettings)
+
+        if (cachedConnection.isEmpty) ftpLike.newConnection(ftpClient(), connectionSettings) else cachedConnection.get
+      }
+
       if (tryConnect.isSuccess) {
-        handler = tryConnect.toOption
+        connection = tryConnect.toOption
+        // TODO is there a way to avoid this type cast?
+        handler = Some(connection.get.handler.asInstanceOf[ftpLike.Handler])
       } else
         tryConnect.failed.foreach { case NonFatal(t) => throw t }
+
       doPreStart()
     } catch {
       case NonFatal(t) =>
@@ -46,7 +58,9 @@ private[ftp] abstract class FtpGraphStageLogic[T, FtpClient, S <: RemoteFileSett
 
   override def postStop(): Unit = {
     try {
-      disconnect()
+      if (connectionSettings.reuseConnections)
+        ftpLike.putConnectionInCache(connection.get)
+      else disconnect()
     } catch {
       case e: IOException =>
         matFailure(e)
@@ -64,7 +78,7 @@ private[ftp] abstract class FtpGraphStageLogic[T, FtpClient, S <: RemoteFileSett
   protected[this] def doPreStart(): Unit
 
   protected[this] def disconnect(): Unit =
-    handler.foreach(ftpLike.disconnect)
+    connection.foreach(_.disconnect())
 
   protected[this] def matSuccess(): Boolean
 

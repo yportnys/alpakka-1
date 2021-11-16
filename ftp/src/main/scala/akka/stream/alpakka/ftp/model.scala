@@ -41,6 +41,7 @@ abstract sealed class RemoteFileSettings {
   def host: InetAddress
   def port: Int
   def credentials: FtpCredentials
+  def reuseConnections: Boolean
 }
 
 /**
@@ -63,6 +64,7 @@ abstract sealed class FtpFileSettings extends RemoteFileSettings {
  * @param configureConnection A function which will be called after connecting to the server. Use this for
  *                            any custom configuration required by the server you are connecting to.
  * @param proxy An optional proxy to use when connecting with these settings
+ * @param reuseConnections specifies whether to use a connection pool to cache the connections between requests
  */
 final class FtpSettings private (
     val host: java.net.InetAddress,
@@ -71,9 +73,9 @@ final class FtpSettings private (
     val binary: Boolean,
     val passiveMode: Boolean,
     val configureConnection: FTPClient => Unit,
-    val proxy: Option[Proxy]
+    val proxy: Option[Proxy],
+    val reuseConnections: Boolean
 ) extends FtpFileSettings {
-
   def withHost(value: java.net.InetAddress): FtpSettings = copy(host = value)
   def withPort(value: Int): FtpSettings = copy(port = value)
   def withCredentials(value: FtpCredentials): FtpSettings = copy(credentials = value)
@@ -81,6 +83,7 @@ final class FtpSettings private (
   def withPassiveMode(value: Boolean): FtpSettings =
     if (passiveMode == value) this else copy(passiveMode = value)
   def withProxy(value: Proxy): FtpSettings = copy(proxy = Some(value))
+  def withReuseConnections(value: Boolean): FtpSettings = copy(reuseConnections = value)
 
   /**
    * Scala API:
@@ -105,7 +108,8 @@ final class FtpSettings private (
       binary: Boolean = binary,
       passiveMode: Boolean = passiveMode,
       configureConnection: FTPClient => Unit = configureConnection,
-      proxy: Option[Proxy] = proxy
+      proxy: Option[Proxy] = proxy,
+      reuseConnections: Boolean = reuseConnections
   ): FtpSettings = new FtpSettings(
     host = host,
     port = port,
@@ -113,7 +117,8 @@ final class FtpSettings private (
     binary = binary,
     passiveMode = passiveMode,
     configureConnection = configureConnection,
-    proxy = proxy
+    proxy = proxy,
+    reuseConnections = reuseConnections
   )
 
   override def toString =
@@ -124,7 +129,8 @@ final class FtpSettings private (
     s"binary=$binary," +
     s"passiveMode=$passiveMode," +
     s"configureConnection=$configureConnection," +
-    s"proxy=$proxy)"
+    s"proxy=$proxy" +
+    s"reuseConnections=$reuseConnections)"
 }
 
 /**
@@ -143,7 +149,8 @@ object FtpSettings {
     binary = false,
     passiveMode = false,
     configureConnection = _ => (),
-    proxy = None
+    proxy = None,
+    reuseConnections = false
   )
 
   /** Java API */
@@ -163,6 +170,7 @@ object FtpSettings {
  * @param configureConnection A function which will be called after connecting to the server. Use this for
  *                            any custom configuration required by the server you are connecting to.
  * @param proxy An optional proxy to use when connecting with these settings
+ * @param reuseConnections specifies whether to use a connection pool to cache the connections between requests
  */
 final class FtpsSettings private (
     val host: java.net.InetAddress,
@@ -171,9 +179,9 @@ final class FtpsSettings private (
     val binary: Boolean,
     val passiveMode: Boolean,
     val configureConnection: FTPSClient => Unit,
-    val proxy: Option[Proxy]
+    val proxy: Option[Proxy],
+    val reuseConnections: Boolean
 ) extends FtpFileSettings {
-
   def withHost(value: java.net.InetAddress): FtpsSettings = copy(host = value)
   def withPort(value: Int): FtpsSettings = copy(port = value)
   def withCredentials(value: FtpCredentials): FtpsSettings = copy(credentials = value)
@@ -181,6 +189,7 @@ final class FtpsSettings private (
   def withPassiveMode(value: Boolean): FtpsSettings =
     if (passiveMode == value) this else copy(passiveMode = value)
   def withProxy(value: Proxy): FtpsSettings = copy(proxy = Some(value))
+  def withReuseConnections(value: Boolean): FtpsSettings = copy(reuseConnections = value)
 
   /**
    * Scala API:
@@ -205,7 +214,8 @@ final class FtpsSettings private (
       binary: Boolean = binary,
       passiveMode: Boolean = passiveMode,
       configureConnection: FTPSClient => Unit = configureConnection,
-      proxy: Option[Proxy] = proxy
+      proxy: Option[Proxy] = proxy,
+      reuseConnections: Boolean = reuseConnections
   ): FtpsSettings = new FtpsSettings(
     host = host,
     port = port,
@@ -213,7 +223,8 @@ final class FtpsSettings private (
     binary = binary,
     passiveMode = passiveMode,
     configureConnection = configureConnection,
-    proxy = proxy
+    proxy = proxy,
+    reuseConnections = reuseConnections
   )
 
   override def toString =
@@ -224,7 +235,8 @@ final class FtpsSettings private (
     s"binary=$binary," +
     s"passiveMode=$passiveMode," +
     s"configureConnection=$configureConnection," +
-    s"proxy=$proxy)"
+    s"proxy=$proxy," +
+    s"reuseConnections=$reuseConnections)"
 }
 
 /**
@@ -243,7 +255,8 @@ object FtpsSettings {
     binary = false,
     passiveMode = false,
     configureConnection = _ => (),
-    proxy = None
+    proxy = None,
+    reuseConnections = false
   )
 
   /** Java API */
@@ -263,6 +276,7 @@ object FtpsSettings {
  * @param sftpIdentity private/public key config to use when connecting
  * @param proxy An optional proxy to use when connecting with these settings
  * @param maxUnconfirmedReads determines the number of read requests sent in parallel, disabled if set to <=1
+ * @param reuseConnections specifies whether to use a connection pool to cache the connections between requests
  */
 final class SftpSettings private (
     val host: java.net.InetAddress,
@@ -272,9 +286,9 @@ final class SftpSettings private (
     val knownHosts: Option[String],
     val sftpIdentity: Option[SftpIdentity],
     val proxy: Option[Proxy],
-    val maxUnconfirmedReads: Int
+    val maxUnconfirmedReads: Int,
+    val reuseConnections: Boolean
 ) extends RemoteFileSettings {
-
   def withHost(value: java.net.InetAddress): SftpSettings = copy(host = value)
   def withPort(value: Int): SftpSettings = copy(port = value)
   def withCredentials(value: FtpCredentials): SftpSettings = copy(credentials = value)
@@ -284,6 +298,7 @@ final class SftpSettings private (
   def withSftpIdentity(value: SftpIdentity): SftpSettings = copy(sftpIdentity = Option(value))
   def withProxy(value: Proxy): SftpSettings = copy(proxy = Some(value))
   def withMaxUnconfirmedReads(value: Int): SftpSettings = copy(maxUnconfirmedReads = value)
+  def withReuseConnections(value: Boolean): SftpSettings = copy(reuseConnections = value)
 
   private def copy(
       host: java.net.InetAddress = host,
@@ -293,7 +308,8 @@ final class SftpSettings private (
       knownHosts: Option[String] = knownHosts,
       sftpIdentity: Option[SftpIdentity] = sftpIdentity,
       proxy: Option[Proxy] = proxy,
-      maxUnconfirmedReads: Int = maxUnconfirmedReads
+      maxUnconfirmedReads: Int = maxUnconfirmedReads,
+      reuseConnections: Boolean = reuseConnections
   ): SftpSettings = new SftpSettings(
     host = host,
     port = port,
@@ -302,7 +318,8 @@ final class SftpSettings private (
     knownHosts = knownHosts,
     sftpIdentity = sftpIdentity,
     proxy = proxy,
-    maxUnconfirmedReads = maxUnconfirmedReads
+    maxUnconfirmedReads = maxUnconfirmedReads,
+    reuseConnections = reuseConnections
   )
 
   override def toString =
@@ -314,7 +331,8 @@ final class SftpSettings private (
     s"knownHosts=$knownHosts," +
     s"sftpIdentity=$sftpIdentity," +
     s"proxy=$proxy," +
-    s"maxUnconfirmedReads=$maxUnconfirmedReads)"
+    s"maxUnconfirmedReads=$maxUnconfirmedReads," +
+    s"reuseConnections=$reuseConnections)"
 }
 
 /**
@@ -334,7 +352,8 @@ object SftpSettings {
     knownHosts = None,
     sftpIdentity = None,
     proxy = None,
-    maxUnconfirmedReads = 1
+    maxUnconfirmedReads = 1,
+    reuseConnections = false
   )
 
   /** Java API */

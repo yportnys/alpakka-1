@@ -11,6 +11,7 @@ import org.apache.commons.net.ftp.{FTPClient, FTPSClient}
 import scala.collection.immutable
 import scala.util.Try
 import java.io.{InputStream, OutputStream}
+import java.util.concurrent.{ConcurrentHashMap, ConcurrentLinkedQueue}
 
 import akka.annotation.InternalApi
 
@@ -20,11 +21,50 @@ import akka.annotation.InternalApi
 @InternalApi
 protected[ftp] trait FtpLike[FtpClient, S <: RemoteFileSettings] {
 
+  type ConnectionT <: Connection[FtpClient, S]
+
   type Handler
 
-  def connect(connectionSettings: S)(implicit ftpClient: FtpClient): Try[Handler]
+  // remote hosts will time out connections after a short time
+  // if a cached connection was put in the cache more than this many millis ago, discard it instead of using it
+  val ConnectionCacheTimeout = 60000
 
-  def disconnect(handler: Handler)(implicit ftpClient: FtpClient): Unit
+  // connectionSettings.toString -> a queue containing cached ConnectionT objects
+  val connectionCache = new ConcurrentHashMap[String, ConcurrentLinkedQueue[ConnectionT]]()
+
+  def newConnection(client: FtpClient, connectionSettings: S): ConnectionT
+
+  def getCachedConnection(connectionSettings: S): Option[ConnectionT] = {
+    val maxTimeCached = System.currentTimeMillis() - ConnectionCacheTimeout
+    val queue = connectionCache.computeIfAbsent(connectionSettings.toString, _ => new ConcurrentLinkedQueue())
+    var conn: Option[ConnectionT] = Option.empty[ConnectionT]
+
+    while (!queue.isEmpty && conn.isEmpty) {
+      val c = queue.poll()
+      if (c != null) {
+        if (c.timeCached < maxTimeCached)
+          Try { c.disconnect() } else conn = Some(c)
+      }
+    }
+
+    conn
+  }
+
+  def putConnectionInCache(conn: ConnectionT): Unit = {
+    conn.timeCached = System.currentTimeMillis()
+    val queue = connectionCache.computeIfAbsent(conn.connectionSettings.toString, _ => new ConcurrentLinkedQueue())
+    queue.add(conn)
+  }
+
+  def closeAllCachedConnections(): Unit = {
+    connectionCache.values().forEach(queue => queue.forEach(conn => Try { conn.disconnect() }))
+    connectionCache.clear()
+  }
+
+  // TODO there's probably a better way of cleaning up all the cached connections. ActorSystem.registerOnTermination?
+  Runtime.getRuntime.addShutdownHook(new Thread("Clean cached ftp connections") {
+    override def run(): Unit = closeAllCachedConnections()
+  })
 
   def listFiles(basePath: String, handler: Handler): immutable.Seq[FtpFile]
 
@@ -67,8 +107,10 @@ protected[ftp] trait UnconfirmedReads { _: FtpLike[_, _] =>
 @InternalApi
 object FtpLike {
   // type class instances
-  implicit val ftpLikeInstance = new FtpLike[FTPClient, FtpSettings] with RetrieveOffset with FtpOperations
-  implicit val ftpsLikeInstance = new FtpLike[FTPSClient, FtpsSettings] with RetrieveOffset with FtpsOperations
+  implicit val ftpLikeInstance =
+    new FtpLike[FTPClient, FtpSettings] with RetrieveOffset with FtpOperations
+  implicit val ftpsLikeInstance =
+    new FtpLike[FTPSClient, FtpsSettings] with RetrieveOffset with FtpsOperations
   implicit val sFtpLikeInstance =
     new FtpLike[SSHClient, SftpSettings] with RetrieveOffset with SftpOperations with UnconfirmedReads
 }
