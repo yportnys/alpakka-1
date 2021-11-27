@@ -27,6 +27,7 @@ protected[ftp] trait FtpLike[FtpClient, S <: RemoteFileSettings] {
 
   // remote hosts will time out connections after a short time
   // if a cached connection was put in the cache more than this many millis ago, discard it instead of using it
+  // In practice during a series of file downloads, a connection will sit in the cache for only a fraction of a second
   val ConnectionCacheTimeout = 60000
 
   // connectionSettings.toString -> a queue containing cached ConnectionT objects
@@ -43,7 +44,8 @@ protected[ftp] trait FtpLike[FtpClient, S <: RemoteFileSettings] {
       val c = queue.poll()
       if (c != null) {
         if (c.timeCached < maxTimeCached)
-          Try { c.disconnect() } else conn = Some(c)
+          Try { c.disconnect() }
+        else conn = Some(c)
       }
     }
 
